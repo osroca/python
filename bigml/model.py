@@ -286,7 +286,7 @@ class Tree(object):
 
             slug = slugify(self.fields[field[0]]['name'])
             self.fields[field[0]].update(slug=slug)
-            default ='nil'
+            default = 'nil'
             if self.fields[field[0]]['optype'] == 'numeric':
                 default = self.fields[field[0]]['summary']['median']
             if field[0] != self.objective_field:
@@ -294,10 +294,10 @@ class Tree(object):
         predictor = ("def predict_%s(data={})\n" %
                      self.fields[self.objective_field]['slug'])
         predictor += (INDENT + "\"\"\" " + docstring +
-                         "\n" + INDENT + "\"\"\"\n")
+                      "\n" + INDENT + "\"\"\"\n")
         predictor += "%sdata = {\n%s%s\n%s}.merge(data)\n" % (
                      INDENT,
-                     INDENT*2,
+                     INDENT * 2,
                      (",\n" + INDENT * 2).join(args),
                      INDENT)
         predictor += self.ruby_body() + "end\n"
@@ -597,9 +597,8 @@ class Model(object):
             self.tree.fields[self.tree.objective_field]['name'],
             self.resource_id))
         self.description = (markdown_cleanup(
-                self.description).strip()
-                or 'Predictive model by BigML - Machine Learning Made Easy' )
+            self.description).strip()
+            or 'Predictive model by BigML - Machine Learning Made Easy')
         docstring += "\n" + INDENT * 2 + ("%s" %
                      self.description)
         return docstring
-        
