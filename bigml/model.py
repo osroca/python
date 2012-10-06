@@ -270,10 +270,77 @@ class Tree(object):
         predictor = "%s(%s):\n" % (predictor_definition,
                                    (",\n" + " " * depth).join(args))
         predictor_doc = (INDENT + "\"\"\" " + docstring +
-                         "\n" + INDENT + "\"\"\"\n\n")
+                         "\n" + INDENT + "\"\"\"\n")
         predictor += predictor_doc + self.python_body()
         out.write(predictor)
         out.flush()
+
+    def ruby(self, out, docstring):
+        """Writes a ruby function that implements the model.
+
+        """
+        args = []
+
+        for field in [(key, val) for key, val in sorted(self.fields.items(),
+                      key=lambda k: k[1]['column_number'])]:
+
+            slug = slugify(self.fields[field[0]]['name'])
+            self.fields[field[0]].update(slug=slug)
+            default ='nil'
+            if self.fields[field[0]]['optype'] == 'numeric':
+                default = self.fields[field[0]]['summary']['median']
+            if field[0] != self.objective_field:
+                args.append(":%s=>%s" % (slug, default))
+        predictor = ("def predict_%s(data={})\n" %
+                     self.fields[self.objective_field]['slug'])
+        predictor += (INDENT + "\"\"\" " + docstring +
+                         "\n" + INDENT + "\"\"\"\n")
+        predictor += "%sdata = {\n%s%s\n%s}.merge(data)\n" % (
+                     INDENT,
+                     INDENT*2,
+                     (",\n" + INDENT * 2).join(args),
+                     INDENT)
+        predictor += self.ruby_body() + "end\n"
+        out.write(predictor)
+        out.flush()
+
+    def ruby_body(self, depth=1, cmv=False):
+        """Translate the model into a set of "if" ruby statements.
+
+        `depth` controls the size of indentation. If `cmv` (control missing
+        values) is set to True then as soon as a value is missing to
+        evaluate a predicate the output at that node is returned without
+        further evaluation.
+
+        """
+        body = ""
+        if self.children:
+            if cmv:
+                field = split(self.children)
+                body += ("%sif (data[:%s].nil?)\n " %
+                        (INDENT * depth,
+                         self.fields[field]['slug']))
+                if self.fields[self.objective_field]['optype'] == 'numeric':
+                    body += ("%s return %s\n" %
+                            (INDENT * (depth + 1),
+                             self.output))
+                else:
+                    body += ("%s return '%s'\n" %
+                            (INDENT * (depth + 1),
+                             self.output))
+                body += "%send\n" % (INDENT * depth)
+
+            for child in self.children:
+                body += ("%sif (data[:%s] %s %s)\n" %
+                        (INDENT * depth,
+                         self.fields[child.predicate.field]['slug'],
+                         PYTHON_OPERATOR[child.predicate.operator],
+                         repr(child.predicate.value)))
+                body += child.ruby_body(depth + 1)
+                body += "%send\n" % (INDENT * depth)
+        else:
+            body = "%s return %s\n" % (INDENT * depth, repr(self.output))
+        return body
 
 
 class Model(object):
@@ -364,15 +431,7 @@ class Model(object):
         `out` is file descriptor to write the python code.
 
         """
-        docstring = ("Predictor for %s from %s\n" % (
-            self.tree.fields[self.tree.objective_field]['name'],
-            self.resource_id))
-        self.description = (markdown_cleanup(
-                self.description).strip()
-                or 'Predictive model by BigML - Machine Learning Made Easy' )
-        docstring += "\n" + INDENT * 2 + ("%s" %
-                     self.description)
-        return self.tree.python(out, docstring)
+        return self.tree.python(out, self.docstring())
 
     def group_prediction(self):
         """ Groups in categories or bins the predicted data
@@ -521,3 +580,26 @@ class Model(object):
                           (round(pred_per_sgroup, 4) * 100,
                           " and ".join(path)))
         out.flush()
+
+    def ruby(self, out=sys.stdout):
+        """Returns a basic ruby function that implements the model.
+
+        `out` is file descriptor to write the ruby code.
+
+        """
+        return self.tree.ruby(out, self.docstring())
+
+    def docstring(self):
+        """Returns the docstring describing the model.
+
+        """
+        docstring = ("Predictor for %s from %s\n" % (
+            self.tree.fields[self.tree.objective_field]['name'],
+            self.resource_id))
+        self.description = (markdown_cleanup(
+                self.description).strip()
+                or 'Predictive model by BigML - Machine Learning Made Easy' )
+        docstring += "\n" + INDENT * 2 + ("%s" %
+                     self.description)
+        return docstring
+        
