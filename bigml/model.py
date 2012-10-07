@@ -53,6 +53,7 @@ LOGGER = logging.getLogger('BigML')
 
 import sys
 import operator
+import re
 
 from bigml.api import FINISHED
 from bigml.util import invert_dictionary, slugify, split, markdown_cleanup
@@ -77,6 +78,11 @@ PYTHON_OPERATOR = {
     ">": ">"
 }
 
+# Map type str to its corresponding objective-c type
+OBJECTIVE_C_TYPE = {
+    "categorical": "NSString*",
+    "numeric": "NSNumber"
+}
 
 INDENT = '    '
 
@@ -602,3 +608,48 @@ class Model(object):
         docstring += "\n" + INDENT * 2 + ("%s" %
                      self.description)
         return docstring
+
+    def objective_c_h(self, out=sys.stdout):
+        """Returns a basic objective-c header description.
+
+        `out` is file descriptor to write the objective-c code.
+
+        """
+        objective_field = self.tree.fields[self.tree.objective_field]
+        objective_field['CamelCase'] = re.sub(r'\w+',
+                                              lambda m:
+                                              m.group(0).capitalize(),
+                                              objective_field['name'])
+        objective_field['CamelCase'] = re.sub(r'\s+',
+                                              '',
+                                              objective_field['CamelCase'])
+        output = \
+"""#import <Foundation/Foundation.h>
+
+@interface %sModel : NSObject
+{
+
+}
+
+-(%s)predict%sWith""" % (objective_field['CamelCase'].capitalize(),
+                         OBJECTIVE_C_TYPE[objective_field['optype']],
+                         objective_field['CamelCase'].capitalize())
+        args = []
+        for field in [(key, val) for key, val in sorted(
+                      self.tree.fields.items(),
+                      key=lambda k: k[1]['column_number'])]:
+            field_obj = self.tree.fields[field[0]]
+            camelCase = re.sub(r'\w+',
+                               lambda m: m.group(0).capitalize(),
+                               field_obj['name'])
+            camelCase = re.sub(r'\s+', '', camelCase)
+            field_obj['camelCase'] = camelCase[0].lower() + camelCase[1:]
+            if field[0] != self.tree.objective_field:
+                args.append("%s:(%s)%s" % (field_obj['camelCase'],
+                            OBJECTIVE_C_TYPE[field_obj['optype']],
+                            field_obj['camelCase']))
+        args_string = ", ".join(args)
+        args_string[0].upper()
+        output += args_string + "\n\n@end\n"
+
+        return output
