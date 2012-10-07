@@ -348,6 +348,66 @@ class Tree(object):
             body = "%s return %s\n" % (INDENT * depth, repr(self.output))
         return body
 
+    def objective_c_m_body(self, depth=1, cmv=False):
+        """Translate the model into a set of "if" objective_c statements.
+
+        `depth` controls the size of indentation. If `cmv` (control missing
+        values) is set to True then as soon as a value is missing to
+        evaluate a predicate the output at that node is returned without
+        further evaluation.
+
+        """
+        body = ""
+        if self.children:
+            if cmv:
+                field = split(self.children)
+                body += ("%sif(%s == nil)\n%s{\n" %
+                        (INDENT * depth,
+                         self.fields[field]['camelCase']),
+                         INDENT * depth)
+                if self.fields[self.objective_field]['optype'] == 'numeric':
+                    body += ("%s return %s;\n" %
+                            (INDENT * (depth + 1),
+                             self.output))
+                else:
+                    body += ("%s return @\"%s\";\n" %
+                            (INDENT * (depth + 1),
+                             self.output))
+                body += "%s}\n" % (INDENT * depth)
+
+            for child in self.children:
+                body += ("%sif(%s %s %s)\n%s{\n" %
+                        (INDENT * depth,
+                         self.fields[child.predicate.field]['camelCase'],
+                         PYTHON_OPERATOR[child.predicate.operator],
+                         repr(child.predicate.value),
+                         INDENT * depth))
+                body += child.objective_c_m_body(depth + 1)
+                body += "%s}\n" % (INDENT * depth)
+        else:
+            if self.fields[self.objective_field]['optype'] == 'numeric':
+                body = "%s return %s;\n" % (INDENT * depth, self.output)
+            else:
+                body = "%s return @\"%s\";\n" % (INDENT * depth, self.output)
+        return body
+
+    def field_add_camelcase(self, field, first_lower=True):
+        """Adds camelCase or CamelCase name to field dict
+
+        """
+        key = "CamelCase"
+        if first_lower:
+            key = key[0].lower() + key[1:]
+        field[key] = re.sub(r'\w+',
+                                    lambda m: m.group(0).capitalize(),
+                                    field['name'])
+        field[key] = re.sub(r'\s+','', field[key])
+        if first_lower:
+            field[key] = field[key][0].lower() + field[key][1:]
+
+    def field_add_slug(self, field):
+        field.update(slug=slugify(field['name']))
+
 
 class Model(object):
     """ A lightweight wrapper around a Tree model.
@@ -610,19 +670,14 @@ class Model(object):
         return docstring
 
     def objective_c_h(self, out=sys.stdout):
-        """Returns a basic objective-c header description.
+        """Returns a basic objective-c header prediction description.
 
         `out` is file descriptor to write the objective-c code.
 
         """
-        objective_field = self.tree.fields[self.tree.objective_field]
-        objective_field['CamelCase'] = re.sub(r'\w+',
-                                              lambda m:
-                                              m.group(0).capitalize(),
-                                              objective_field['name'])
-        objective_field['CamelCase'] = re.sub(r'\s+',
-                                              '',
-                                              objective_field['CamelCase'])
+        objective_field = self.tree.fields[self.tree.objective_field]  
+        if not 'CamelCase' in objective_field:
+            self.tree.field_add_camelcase(objective_field, False)
         output = \
 """#import <Foundation/Foundation.h>
 
@@ -631,25 +686,57 @@ class Model(object):
 
 }
 
--(%s)predict%sWith""" % (objective_field['CamelCase'].capitalize(),
+""" % objective_field['CamelCase']
+        output += self.objective_c_signature()
+        output += "\n\n@end\n"
+
+        return output
+
+    def objective_c_signature(self):
+        """Returns a the objective-c signature for a prediction method.
+
+        """
+        objective_field = self.tree.fields[self.tree.objective_field]  
+        if not 'CamelCase' in objective_field:
+            self.tree.field_add_camelcase(objective_field, False)
+
+        output = "-(%s)predict%sWith" % (
                          OBJECTIVE_C_TYPE[objective_field['optype']],
-                         objective_field['CamelCase'].capitalize())
+                         objective_field['CamelCase'])
         args = []
         for field in [(key, val) for key, val in sorted(
                       self.tree.fields.items(),
                       key=lambda k: k[1]['column_number'])]:
             field_obj = self.tree.fields[field[0]]
-            camelCase = re.sub(r'\w+',
-                               lambda m: m.group(0).capitalize(),
-                               field_obj['name'])
-            camelCase = re.sub(r'\s+', '', camelCase)
-            field_obj['camelCase'] = camelCase[0].lower() + camelCase[1:]
+            if not 'camelCase' in field_obj:
+                self.tree.field_add_camelcase(field_obj)
             if field[0] != self.tree.objective_field:
                 args.append("%s:(%s)%s" % (field_obj['camelCase'],
                             OBJECTIVE_C_TYPE[field_obj['optype']],
                             field_obj['camelCase']))
         args_string = ", ".join(args)
-        args_string[0].upper()
-        output += args_string + "\n\n@end\n"
+        output += args_string[0].upper() + args_string[1:]
+
+        return output
+
+    def objective_c_m(self, out=sys.stdout):
+        """Returns a basic objective-c implementation of local predictions
+
+        `out` is file descriptor to write the objective-c code.
+
+        """
+        objective_field = self.tree.fields[self.tree.objective_field]  
+        if not 'CamelCase' in objective_field:
+            self.field_add_camelcase(objective_field, False)
+        output = \
+"""#import "%sModel.h"
+
+@implementation %sModel
+
+""" % (objective_field['CamelCase'], objective_field['CamelCase']) 
+        output += self.objective_c_signature()
+        output += "\n{\n"
+        output += self.tree.objective_c_m_body()
+        output += "%sreturn nil;\n}\n\n@end\n" % INDENT
 
         return output
