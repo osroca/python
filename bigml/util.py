@@ -96,3 +96,33 @@ def markdown_cleanup(text):
     text = cleanup_bold_and_italic(text)
     text = links_to_footer(text)
     return text
+
+def to_camelcase(text, first_lower=True):
+    """Returns the text in camelCase or CamelCase format
+
+    """
+    text = re.sub(r'\w+', lambda m: m.group(0).capitalize(), text)
+    text = re.sub(r'\s+','', text)
+    if first_lower:
+        text = text[0].lower() + text[1:]
+    return text
+
+def sort_fields(fields):
+    """Sort fields by their column_number but put together parents and children.
+
+    """
+    fathers =  [ (key, val) for key, val in sorted(fields.items(), key=lambda k:k[1]['column_number']) if not 'auto_generated' in val ]
+    children =  [ (key, val) for key, val in sorted(fields.items(), key=lambda k:k[1]['column_number']) if 'auto_generated' in val ]
+    children.reverse()
+    fathers_keys = [ father[0] for father in fathers ]
+    for child in children:
+        try:
+            index =  fathers_keys.index(child[1]['parent_ids'][0])
+        except ValueError:
+            index = -1
+
+        if index >=0:
+            fathers.insert(index+1, child)
+        else:
+            fathers.append(child)
+    return fathers

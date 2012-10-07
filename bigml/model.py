@@ -56,7 +56,8 @@ import operator
 import re
 
 from bigml.api import FINISHED
-from bigml.util import invert_dictionary, slugify, split, markdown_cleanup
+from bigml.util import invert_dictionary, slugify, split, markdown_cleanup, \
+    to_camelcase, sort_fields
 
 # Map operator str to its corresponding function
 OPERATOR = {
@@ -148,7 +149,7 @@ class Tree(object):
             elif 'categories' in summary:
                 self.distribution = summary['categories']
 
-    def list_fields(self, out):
+    def list_fields(self, out=sys.stdout):
         """List a description of the model's fields.
 
         """
@@ -158,8 +159,7 @@ class Tree(object):
         out.flush()
 
         for field in [(val['name'], val['optype']) for key, val in
-                      sorted(self.fields.items(),
-                      key=lambda k: k[1]['column_number'])
+                      sort_fields(self.fields)
                       if key != self.objective_field]:
             out.write('[%-32s : %s]\n' % (field[0], field[1]))
             out.flush()
@@ -210,8 +210,7 @@ class Tree(object):
         """Prints out an IF-THEN rule version of the tree.
 
         """
-        for field in [(key, val) for key, val in sorted(self.fields.items(),
-                      key=lambda k: k[1]['column_number'])]:
+        for field in [(key, val) for key, val in sort_fields(self.fields)]:
 
             slug = slugify(self.fields[field[0]]['name'])
             self.fields[field[0]].update(slug=slug)
@@ -260,8 +259,7 @@ class Tree(object):
         """
         args = []
 
-        for field in [(key, val) for key, val in sorted(self.fields.items(),
-                      key=lambda k: k[1]['column_number'])]:
+        for field in [(key, val) for key, val in sort_fields(self.fields)]:
 
             slug = slugify(self.fields[field[0]]['name'])
             self.fields[field[0]].update(slug=slug)
@@ -287,8 +285,7 @@ class Tree(object):
         """
         args = []
 
-        for field in [(key, val) for key, val in sorted(self.fields.items(),
-                      key=lambda k: k[1]['column_number'])]:
+        for field in [(key, val) for key, val in sort_fields(self.fields)]:
 
             slug = slugify(self.fields[field[0]]['name'])
             self.fields[field[0]].update(slug=slug)
@@ -391,22 +388,6 @@ class Tree(object):
                 body = "%s return @\"%s\";\n" % (INDENT * depth, self.output)
         return body
 
-    def field_add_camelcase(self, field, first_lower=True):
-        """Adds camelCase or CamelCase name to field dict
-
-        """
-        key = "CamelCase"
-        if first_lower:
-            key = key[0].lower() + key[1:]
-        field[key] = re.sub(r'\w+',
-                                    lambda m: m.group(0).capitalize(),
-                                    field['name'])
-        field[key] = re.sub(r'\s+','', field[key])
-        if first_lower:
-            field[key] = field[key][0].lower() + field[key][1:]
-
-    def field_add_slug(self, field):
-        field.update(slug=slugify(field['name']))
 
 
 class Model(object):
@@ -677,7 +658,8 @@ class Model(object):
         """
         objective_field = self.tree.fields[self.tree.objective_field]  
         if not 'CamelCase' in objective_field:
-            self.tree.field_add_camelcase(objective_field, False)
+            camelcase = to_camelcase(objective_field['name'], False)
+            objective_field['CamelCase'] = camelcase
         output = \
 """#import <Foundation/Foundation.h>
 
@@ -690,7 +672,8 @@ class Model(object):
         output += self.objective_c_signature()
         output += "\n\n@end\n"
 
-        return output
+        out.write(output)
+        out.flush()
 
     def objective_c_signature(self):
         """Returns a the objective-c signature for a prediction method.
@@ -698,18 +681,17 @@ class Model(object):
         """
         objective_field = self.tree.fields[self.tree.objective_field]  
         if not 'CamelCase' in objective_field:
-            self.tree.field_add_camelcase(objective_field, False)
+            camelcase = to_camelcase(objective_field['name'], False)
+            objective_field['CamelCase'] = camelcase
 
         output = "-(%s)predict%sWith" % (
                          OBJECTIVE_C_TYPE[objective_field['optype']],
                          objective_field['CamelCase'])
         args = []
-        for field in [(key, val) for key, val in sorted(
-                      self.tree.fields.items(),
-                      key=lambda k: k[1]['column_number'])]:
+        for field in [(key, val) for key, val in sort_fields(self.tree.fields)]:
             field_obj = self.tree.fields[field[0]]
             if not 'camelCase' in field_obj:
-                self.tree.field_add_camelcase(field_obj)
+                field_obj['camelCase'] = to_camelcase(field_obj['name'])
             if field[0] != self.tree.objective_field:
                 args.append("%s:(%s)%s" % (field_obj['camelCase'],
                             OBJECTIVE_C_TYPE[field_obj['optype']],
@@ -727,7 +709,8 @@ class Model(object):
         """
         objective_field = self.tree.fields[self.tree.objective_field]  
         if not 'CamelCase' in objective_field:
-            self.field_add_camelcase(objective_field, False)
+            camelcase = to_camelcase(objective_field['name'], False)
+            objective_field['CamelCase'] = camelcase
         output = \
 """#import "%sModel.h"
 
@@ -739,4 +722,5 @@ class Model(object):
         output += self.tree.objective_c_m_body()
         output += "%sreturn nil;\n}\n\n@end\n" % INDENT
 
-        return output
+        out.write(output)
+        out.flush()
